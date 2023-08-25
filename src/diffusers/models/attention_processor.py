@@ -1298,7 +1298,7 @@ class LoRAAttnProcessor2_0(nn.Module):
 
     def __call__(self, attn: Attention, hidden_states, encoder_hidden_states=None, attention_mask=None, scale=1.0):
         residual = hidden_states
-
+        print(f"From LoRA attn processors 2.0, scale: {scale}")
         input_ndim = hidden_states.ndim
 
         if input_ndim == 4:
