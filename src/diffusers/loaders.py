@@ -116,9 +116,10 @@ class PatchedLoraProjection(nn.Module):
 
         fused_weight = self.regular_linear_layer.weight.data
         dtype, device = fused_weight.dtype, fused_weight.device
+        fused_weight = fused_weight.float()
 
-        self.w_up = self.w_up.to(device=device, dtype=dtype)
-        self.w_down = self.w_down.to(device, dtype=dtype)
+        self.w_up = self.w_up.float().to(device=device)
+        self.w_down = self.w_down.float().to(device=device)
         unfused_weight = fused_weight - torch.bmm(self.w_up[None, :], self.w_down[None, :])[0]
         self.regular_linear_layer.weight.data = unfused_weight.to(device=device, dtype=dtype)
 

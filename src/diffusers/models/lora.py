@@ -130,9 +130,10 @@ class LoRACompatibleConv(nn.Conv2d):
 
         fused_weight = self.weight.data
         dtype, device = fused_weight.data.dtype, fused_weight.data.device
+        fused_weight = fused_weight.float()
 
-        self.w_up = self.w_up.to(device=device, dtype=dtype)
-        self.w_down = self.w_down.to(device, dtype=dtype)
+        self.w_up = self.w_up.float().to(device=device)
+        self.w_down = self.w_down.float().to(device=device)
 
         fusion = torch.mm(self.w_up.flatten(start_dim=1), self.w_down.flatten(start_dim=1))
         fusion = fusion.reshape((fused_weight.shape))
@@ -194,9 +195,10 @@ class LoRACompatibleLinear(nn.Linear):
 
         fused_weight = self.weight.data
         dtype, device = fused_weight.dtype, fused_weight.device
+        fused_weight = fused_weight.float()
 
-        self.w_up = self.w_up.to(device=device, dtype=dtype)
-        self.w_down = self.w_down.to(device, dtype=dtype)
+        self.w_up = self.w_up.float().to(device=device)
+        self.w_down = self.w_down.float().to(device)
         unfused_weight = fused_weight - torch.bmm(self.w_up[None, :], self.w_down[None, :])[0]
         self.weight.data = unfused_weight.to(device=device, dtype=dtype)
 
