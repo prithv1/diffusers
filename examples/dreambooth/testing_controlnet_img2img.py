@@ -73,14 +73,37 @@ def parse_args():
         type=int,
         default=200,
     )
+    parser.add_argument(
+        "--use_ft",
+        type=int,
+        default=1,
+    )
+    parser.add_argument(
+        "--img_dump_dir",
+        default=None,
+        type=str,
+        help="path of folder to dump image",
+    )
+    parser.add_argument(
+        "--prompt",
+        default="egocentric view of a high resolution, photorealistic urban street scene in sks",
+        type=str,
+        help="text prompt for generation",
+    )
     args, _ = parser.parse_known_args()
 
     return args
 
 def main(args):
     device = "cuda"
+    # output_folder = os.path.join(
+    #         "logs/images", args.filepath, f"ctnet_i2i_debug_{args.filepath}_e{args.ckpt}"
+    #     )
+    if args.img_dump_dir is None:
+        args.img_dump_dir = args.filepath
+         
     output_folder = os.path.join(
-            "logs/images", args.filepath, f"ctnet_i2i_debug_{args.filepath}_e{args.ckpt}"
+            "logs/images", args.img_dump_dir, f"ctnet_i2i_debug_e{args.ckpt}"
         )
     
     # We'll condition on both segmentation and image
@@ -92,21 +115,23 @@ def main(args):
     create_directory(output_folder)
     
     # To work with finetuned checkpoint
-    model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
-    pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        model_id, controlnet=controlnet, torch_dtype=torch.float16
-    )
-    
+    if args.use_ft == 1:
+        model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            model_id, controlnet=controlnet, torch_dtype=torch.float16
+        )
+    else:
     # To work with off-the-shelf checkpoint
-    # pipe = StableDiffusionControlNetPipeline.from_pretrained(
-    #     "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
-    # )
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
+        )
     
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
     pipe.enable_model_cpu_offload() 
     # pipe.enable_xformers_memory_efficient_attention()
     
-    prompt = ["egocentric view of a high resolution, photorealistic urban street scene in sks"]*2
+    # prompt = ["egocentric view of a high resolution, photorealistic urban street scene in sks"]*2
+    prompt = [args.prompt]*2
     generator = [torch.Generator(device="cpu").manual_seed(25) for i in range(len(prompt))]
     
     init_image = Image.open(args.src_img).convert("RGB")
@@ -147,7 +172,7 @@ def main(args):
         controlnet_conditioning_scale=[1.0, 0.5], # Controllable hparam
     ).images[0]
     
-    image = image.resize((1914, 1052), Image.LANCZOS)
+    # image = image.resize((1914, 1052), Image.LANCZOS)
     image.save(os.path.join(output_folder, f"tr_im_{str(args.img_id)}.png"))
     
 if __name__ == "__main__":
