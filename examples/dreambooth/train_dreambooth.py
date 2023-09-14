@@ -1,22 +1,14 @@
-#!/usr/bin/env python
-# coding=utf-8
-# Copyright 2022 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
+# ---------------------------------------------------------------
+# Copyright 2023 Telecom Paris, Yasser BENIGMIM. All rights reserved.
+# Licensed under the Apache License, Version 2.0
+# ---------------------------------------------------------------
 
 import argparse
 import hashlib
 import itertools
 import logging
+import pdb
+
 import math
 import os
 import warnings
@@ -27,6 +19,7 @@ import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch.utils.data import Dataset
+from torchvision.utils import save_image
 
 import datasets
 import diffusers
@@ -43,10 +36,11 @@ from PIL import Image
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer, PretrainedConfig
+import matplotlib.pyplot as plt
 
 
 # Will error if the minimal version of diffusers is not installed. Remove at your own risks.
-check_min_version("0.12.0")
+check_min_version("0.10.0.dev0")
 
 logger = get_logger(__name__)
 
@@ -76,8 +70,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
-        default=None,
-        required=True,
+        default="CompVis/stable-diffusion-v1-4",
         help="Path to pretrained model or model identifier from huggingface.co/models.",
     )
     parser.add_argument(
@@ -113,8 +106,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--instance_prompt",
         type=str,
-        default=None,
-        required=True,
+        default="a photo of a sks urban scene",
         help="The prompt with identifier specifying the instance",
     )
     parser.add_argument(
@@ -133,7 +125,7 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--num_class_images",
         type=int,
-        default=100,
+        default=200,
         help=(
             "Minimal class images for prior preservation loss. If there are not enough images already present in"
             " class_data_dir, additional images will be sampled with class_prompt."
@@ -142,35 +134,30 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--output_dir",
         type=str,
-        default="text-inversion-model",
+        default=None,
+        required=True,
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
         type=int,
-        default=512,
+        default=1024,
         help=(
             "The resolution for input images, all the images in the train/validation dataset will be resized to this"
             " resolution"
         ),
     )
     parser.add_argument(
-        "--center_crop",
-        default=False,
-        action="store_true",
-        help=(
-            "Whether to center crop the input images to the resolution. If not set, the images will be randomly"
-            " cropped. The images will be resized to the resolution first before cropping."
-        ),
+        "--center_crop", action="store_true", help="Whether to center crop images before resizing to resolution"
     )
     parser.add_argument(
         "--train_text_encoder",
-        action="store_true",
+        default=True,
         help="Whether to train the text encoder. If set, the text encoder should be float32 precision.",
     )
     parser.add_argument(
-        "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."
+        "--train_batch_size", type=int, default=1, help="Batch size (per device) for the training dataloader."
     )
     parser.add_argument(
         "--sample_batch_size", type=int, default=4, help="Batch size (per device) for sampling images."
@@ -179,13 +166,13 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--max_train_steps",
         type=int,
-        default=None,
+        default=1000,
         help="Total number of training steps to perform.  If provided, overrides num_train_epochs.",
     )
     parser.add_argument(
         "--checkpointing_steps",
         type=int,
-        default=500,
+        default=200,
         help=(
             "Save a checkpoint of the training state every X updates. These checkpoints can be used both as final"
             " checkpoints in case they are better than the last checkpoint, and are also suitable for resuming"
@@ -234,7 +221,7 @@ def parse_args(input_args=None):
         ),
     )
     parser.add_argument(
-        "--lr_warmup_steps", type=int, default=500, help="Number of steps for the warmup in the lr scheduler."
+        "--lr_warmup_steps", type=int, default=0, help="Number of steps for the warmup in the lr scheduler."
     )
     parser.add_argument(
         "--lr_num_cycles",
@@ -245,14 +232,6 @@ def parse_args(input_args=None):
     parser.add_argument("--lr_power", type=float, default=1.0, help="Power factor of the polynomial scheduler.")
     parser.add_argument(
         "--use_8bit_adam", action="store_true", help="Whether or not to use 8-bit Adam from bitsandbytes."
-    )
-    parser.add_argument(
-        "--dataloader_num_workers",
-        type=int,
-        default=0,
-        help=(
-            "Number of subprocesses to use for data loading. 0 means that the data will be loaded in the main process."
-        ),
     )
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")
@@ -319,12 +298,11 @@ def parse_args(input_args=None):
         "--enable_xformers_memory_efficient_attention", action="store_true", help="Whether or not to use xformers."
     )
     parser.add_argument(
-        "--set_grads_to_none",
-        action="store_true",
+        "--crop-size",
+        type=int,
+        default=512,
         help=(
-            "Save more memory by using setting grads to None instead of zero. Be aware, that this changes certain"
-            " behaviors, so disable this argument if it causes any problems. More info:"
-            " https://pytorch.org/docs/stable/generated/torch.optim.Optimizer.zero_grad.html"
+            "The size of the crop to use for training. If the image is smaller than the crop, it will be padded."
         ),
     )
 
@@ -349,6 +327,7 @@ def parse_args(input_args=None):
         if args.class_prompt is not None:
             warnings.warn("You need not use --class_prompt without --with_prior_preservation.")
 
+    args.output_dir = os.path.join("logs/checkpoints", args.output_dir)
     return args
 
 
@@ -366,10 +345,9 @@ class DreamBoothDataset(Dataset):
         class_data_root=None,
         class_prompt=None,
         size=512,
-        center_crop=False,
+        crop=512,
     ):
-        self.size = size
-        self.center_crop = center_crop
+        # self.size = size
         self.tokenizer = tokenizer
 
         self.instance_data_root = Path(instance_data_root)
@@ -391,14 +369,23 @@ class DreamBoothDataset(Dataset):
         else:
             self.class_data_root = None
 
-        self.image_transforms = transforms.Compose(
-            [
-                transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
-                transforms.CenterCrop(size) if center_crop else transforms.RandomCrop(size),
-                transforms.ToTensor(),
-                transforms.Normalize([0.5], [0.5]),
-            ]
-        )
+        self.train_image_transforms = transforms.Compose(
+                [
+                    transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                    transforms.RandomCrop(crop),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
+
+        self.reg_image_transforms = transforms.Compose(
+                [
+                    # transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                    transforms.RandomCrop(crop),
+                    transforms.ToTensor(),
+                    transforms.Normalize([0.5], [0.5]),
+                ]
+            )
 
     def __len__(self):
         return self._length
@@ -408,7 +395,7 @@ class DreamBoothDataset(Dataset):
         instance_image = Image.open(self.instance_images_path[index % self.num_instance_images])
         if not instance_image.mode == "RGB":
             instance_image = instance_image.convert("RGB")
-        example["instance_images"] = self.image_transforms(instance_image)
+        example["instance_images"] = self.train_image_transforms(instance_image)
         example["instance_prompt_ids"] = self.tokenizer(
             self.instance_prompt,
             truncation=True,
@@ -421,7 +408,7 @@ class DreamBoothDataset(Dataset):
             class_image = Image.open(self.class_images_path[index % self.num_class_images])
             if not class_image.mode == "RGB":
                 class_image = class_image.convert("RGB")
-            example["class_images"] = self.image_transforms(class_image)
+            example["class_images"] = self.reg_image_transforms(class_image)
             example["class_prompt_ids"] = self.tokenizer(
                 self.class_prompt,
                 truncation=True,
@@ -489,7 +476,7 @@ def main(args):
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
-        logging_dir=logging_dir,
+        # logging_dir=logging_dir,
     )
 
     # Currently, it's not possible to do gradient accumulation when training two models with accelerate.accumulate
@@ -667,7 +654,7 @@ def main(args):
         class_prompt=args.class_prompt,
         tokenizer=tokenizer,
         size=args.resolution,
-        center_crop=args.center_crop,
+        crop=args.crop_size,
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -675,7 +662,7 @@ def main(args):
         batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=lambda examples: collate_fn(examples, args.with_prior_preservation),
-        num_workers=args.dataloader_num_workers,
+        num_workers=4,
     )
 
     # Scheduler and math around the number of training steps.
@@ -722,16 +709,11 @@ def main(args):
         " doing mixed precision training. copy of the weights should still be float32."
     )
 
-    if accelerator.unwrap_model(unet).dtype != torch.float32:
-        raise ValueError(
-            f"Unet loaded as datatype {accelerator.unwrap_model(unet).dtype}. {low_precision_error_string}"
-        )
+    if unet.dtype != torch.float32:
+        raise ValueError(f"Unet loaded as datatype {unet.dtype}. {low_precision_error_string}")
 
-    if args.train_text_encoder and accelerator.unwrap_model(text_encoder).dtype != torch.float32:
-        raise ValueError(
-            f"Text encoder loaded as datatype {accelerator.unwrap_model(text_encoder).dtype}."
-            f" {low_precision_error_string}"
-        )
+    if args.train_text_encoder and text_encoder.dtype != torch.float32:
+        raise ValueError(f"Text encoder loaded as datatype {text_encoder.dtype}. {low_precision_error_string}")
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -768,21 +750,14 @@ def main(args):
             dirs = os.listdir(args.output_dir)
             dirs = [d for d in dirs if d.startswith("checkpoint")]
             dirs = sorted(dirs, key=lambda x: int(x.split("-")[1]))
-            path = dirs[-1] if len(dirs) > 0 else None
+            path = dirs[-1]
+        accelerator.print(f"Resuming from checkpoint {path}")
+        accelerator.load_state(os.path.join(args.output_dir, path))
+        global_step = int(path.split("-")[1])
 
-        if path is None:
-            accelerator.print(
-                f"Checkpoint '{args.resume_from_checkpoint}' does not exist. Starting a new training run."
-            )
-            args.resume_from_checkpoint = None
-        else:
-            accelerator.print(f"Resuming from checkpoint {path}")
-            accelerator.load_state(os.path.join(args.output_dir, path))
-            global_step = int(path.split("-")[1])
-
-            resume_global_step = global_step * args.gradient_accumulation_steps
-            first_epoch = global_step // num_update_steps_per_epoch
-            resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
+        resume_global_step = global_step * args.gradient_accumulation_steps
+        first_epoch = resume_global_step // num_update_steps_per_epoch
+        resume_step = resume_global_step % num_update_steps_per_epoch
 
     # Only show the progress bar once on each machine.
     progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
@@ -855,7 +830,7 @@ def main(args):
                     accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
                 optimizer.step()
                 lr_scheduler.step()
-                optimizer.zero_grad(set_to_none=args.set_grads_to_none)
+                optimizer.zero_grad()
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
