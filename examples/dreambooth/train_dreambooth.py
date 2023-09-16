@@ -305,6 +305,15 @@ def parse_args(input_args=None):
             "The size of the crop to use for training. If the image is smaller than the crop, it will be padded."
         ),
     )
+    
+    parser.add_argument(
+        "--resize_reg_img",
+        type=int,
+        default=0,
+        help=(
+            "Should we resize the reg_image?"
+        ),
+    )
 
     if input_args is not None:
         args = parser.parse_args(input_args)
@@ -346,6 +355,7 @@ class DreamBoothDataset(Dataset):
         class_prompt=None,
         size=512,
         crop=512,
+        resize_reg_img=0,
     ):
         # self.size = size
         self.tokenizer = tokenizer
@@ -378,14 +388,24 @@ class DreamBoothDataset(Dataset):
                 ]
             )
 
-        self.reg_image_transforms = transforms.Compose(
-                [
-                    # transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
-                    transforms.RandomCrop(crop),
-                    transforms.ToTensor(),
-                    transforms.Normalize([0.5], [0.5]),
-                ]
-            )
+        if resize_reg_img == 1:
+            self.reg_image_transforms = transforms.Compose(
+                    [
+                        transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                        transforms.RandomCrop(crop),
+                        transforms.ToTensor(),
+                        transforms.Normalize([0.5], [0.5]),
+                    ]
+                )
+        else:
+            self.reg_image_transforms = transforms.Compose(
+                    [
+                        # transforms.Resize(size, interpolation=transforms.InterpolationMode.BILINEAR),
+                        transforms.RandomCrop(crop),
+                        transforms.ToTensor(),
+                        transforms.Normalize([0.5], [0.5]),
+                    ]
+                )
 
     def __len__(self):
         return self._length
@@ -646,6 +666,8 @@ def main(args):
         eps=args.adam_epsilon,
     )
 
+    resize_reg_img = args.resize_reg_img
+
     # Dataset and DataLoaders creation:
     train_dataset = DreamBoothDataset(
         instance_data_root=args.instance_data_dir,
@@ -655,6 +677,7 @@ def main(args):
         tokenizer=tokenizer,
         size=args.resolution,
         crop=args.crop_size,
+        resize_reg_img=resize_reg_img, # Custom added for NYUv2
     )
 
     train_dataloader = torch.utils.data.DataLoader(

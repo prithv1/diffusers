@@ -74,7 +74,22 @@ CITYSCAPES_NAME2COLOR = {
     'bicycle'      : (119, 11, 32),
 }
 
+# NYUv2_NAME2COLOR = {}
 
+def get_nyuv2_color_scheme(palette_csv):
+    df = pd.read_csv(palette_csv)
+    sem_ids = list(df["semantic_id "].unique())
+    name2color = {}
+    for semid in sem_ids:
+        sub_df = df[df["semantic_id "] == semid]
+        sub_data = list(sub_df.T.to_dict().values())[0]
+        k = sub_data[" semantic_name  "].strip(" ")
+        v = (sub_data[" semantic_color_r "], sub_data[" semantic_color_g "], sub_data[" semantic_color_b"])
+        name2color[k] = v
+    return name2color
+
+NYUv2_NAME2COLOR = get_nyuv2_color_scheme("nyuv2_labels.csv")
+    
 def load_csv():
     ret_data = []
     df = pd.read_csv("ade20k_color_coding.csv")
@@ -91,6 +106,7 @@ def load_csv():
             ret_data.append(d)
     n_df = pd.DataFrame(ret_data)
     return n_df
+
 
 def make_dataset_specific_json(dset="cityscapes"):
     ade_df = load_csv()
@@ -126,6 +142,43 @@ def make_dataset_specific_json(dset="cityscapes"):
         pprint(translate_map)
         with open("city2ade_translate_map.json", "w") as f:
             json.dump(translate_map, f)
+    elif dset == "nyuv2":
+        # custom nyuv2 name map
+        change_keys = {
+            "bookshelf" : "bookcase",
+            "blinds" : "blind",
+            "shelves" : "shelf",
+            "floormat" : "carpet",
+            "books" : "book",
+            "paper": "poster",
+            "showercurtain" : "curtain", # C
+            "whiteboard" : "board",
+            "nightstand" : "grandstand",
+            "otherfurniture" : "table",
+            "otherstructure" : "column",
+            "otherprop" : "pot",
+        }
+        use_map = copy.deepcopy(NYUv2_NAME2COLOR)
+        for k in change_keys.keys():
+            use_map[change_keys[k]] = use_map[k]
+            del use_map[k]
+        rev_map = {v:k for k,v in use_map.items()}
+        # pprint(rev_map)
+        translate_map = {}
+        for city_color in rev_map.keys():
+            city_cls = rev_map[city_color]
+            # print(city_cls)
+            # print(city_color)
+            # Get color from ade
+            sub_dct = list(ade_df[ade_df["Name"] == city_cls].T.to_dict().values())[0]
+            ade_color = sub_dct["Color_Code (R,G,B)"]
+            ade_color = tuple([int(x) for x in re.findall(r'\d+', ade_color)])
+            print(city_cls, city_color, ade_color)
+            translate_map[str(city_color)] = ade_color
+        print("*"*20)
+        pprint(translate_map)
+        with open("nyu2ade_translate_map.json", "w") as f:
+            json.dump(translate_map, f)
     else:
         print("Not supported yet")
 
@@ -133,4 +186,5 @@ def make_dataset_specific_json(dset="cityscapes"):
     
 if __name__ == "__main__":
     # load_csv()
-    make_dataset_specific_json()
+    # make_dataset_specific_json()
+    make_dataset_specific_json("nyuv2")
