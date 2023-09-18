@@ -66,7 +66,7 @@ def replace_black_pixels_vectorized(img, height=400, replacement_color=(0, 0, 14
     img_array[black_pixels] = replacement_color
 
     modified_img = Image.fromarray(np.uint8(img_array))
-    return modified_image
+    return modified_img
 
 
 def parse_args():
