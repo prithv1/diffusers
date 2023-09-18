@@ -1,0 +1,8 @@
+{
+    "Mapillary": "testing_v6_rml_sd_v15_pp_map_n500_rand1234",
+    "Cityscapes": "testing_v6_rml_sd_v15_pp_city_n500_rand1234",
+    "NuScenes": "testing_v6_rml_sd_v15_pp_nusc_n400_rand1234",
+    "Synthia": "testing_v6_rml_sd_v15_pp_synthia_n500_rand1234",
+    "BDD": "testing_v6_rml_sd_v15_pp_bdd10k_n500_rand1234",
+    "GTAV": "testing_v6_rml_sd_v15_pp_gtav_n500_rand1234"
+}
