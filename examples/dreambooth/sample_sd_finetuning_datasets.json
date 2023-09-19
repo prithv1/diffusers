@@ -1,0 +1,9 @@
+{
+    "GTAV": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_gtav_n500_rand1234",
+    "Synthia": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_synthia_n500_rand1234",
+    "NuScenes": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_nuscenes_n400_rand1234",
+    "Mapillary": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_mapillary_n500_rand1234",
+    "Cityscapes": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_city_n500_rand1234",
+    "BDD": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_bdd10k_n500_rand1234",
+    "CODA": "/nethome/prithvijit3/projects/Diffusion-DA/generation/diffusers/examples/dreambooth/sd_datasets/sd_v3_dataset_coda_n350_rand1234"
+}
