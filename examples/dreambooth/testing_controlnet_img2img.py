@@ -72,6 +72,13 @@ def replace_black_pixels_vectorized(img, height=400, replacement_color=(0, 0, 14
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     parser.add_argument(
+        "--rootdir_filepath",
+        required=False,
+        type=str,
+        default=None,
+        help="root dir of model",
+    )
+    parser.add_argument(
         "--filepath",
         required=True,
         type=str,
@@ -113,6 +120,12 @@ def parse_args():
         "--use_ft",
         type=int,
         default=1,
+    )
+    parser.add_argument(
+        "--rootdir_img_dump_dir",
+        default=None,
+        type=str,
+        help="path of root dir to dump image",
     )
     parser.add_argument(
         "--img_dump_dir",
@@ -169,10 +182,15 @@ def main(args):
     #     )
     if args.img_dump_dir is None:
         args.img_dump_dir = args.filepath
-         
-    output_folder = os.path.join(
-            "logs/images", args.img_dump_dir, f"ctnet_i2i_debug_e{args.ckpt}"
+    
+    if args.rootdir_img_dump_dir:
+        output_folder = os.path.join(
+            args.rootdir_img_dump_dir, args.img_dump_dir, f"ctnet_i2i_debug_e{args.ckpt}"
         )
+    else:
+        output_folder = os.path.join(
+                "logs/images", args.img_dump_dir, f"ctnet_i2i_debug_e{args.ckpt}"
+            )
     
     # We'll condition on both segmentation and image
     controlnet = [
@@ -184,7 +202,12 @@ def main(args):
     
     # To work with finetuned checkpoint
     if args.use_ft == 1:
-        model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
+        
+        if args.rootdir_filepath:
+            model_id = os.path.join(args.rootdir_filepath, args.filepath, f"inf_ckpt{args.ckpt}")
+        else:
+            model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
+    
         pipe = StableDiffusionControlNetPipeline.from_pretrained(
             model_id, controlnet=controlnet, torch_dtype=torch.float16
         )
