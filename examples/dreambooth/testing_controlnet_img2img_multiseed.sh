@@ -35,6 +35,23 @@ do
     done
 done
 
+# for SEED in 10 20 30 40
+# do
+#     for ID in 16 25 33 43 50
+#     do
+#         python testing_controlnet_img2img.py \
+#             --filepath testing_v6_rml_sd_v15_pp_map_n500_rand1234 \
+#             --ckpt 2000 \
+#             --src_img /srv/share4/datasets/GTA5DA/images/000$ID.png \
+#             --src_lbl /srv/share4/datasets/GTA5DA/labels/000$ID.png \
+#             --img_id $ID \
+#             --img_dump_dir map_sdv15_ctv11_mlsd_gta2real_v4_g50_c2k_seed$SEED \
+#             --seed $SEED \
+#             --car_hood_fix 1 \
+#             --use_mlsd 1
+#     done
+# done
+
 # Cityscapes Fine-tuned Stable Diffusion
 for SEED in 10 20 30 40
 do
@@ -158,6 +175,25 @@ done
 #             --seed $SEED
 #     done
 # done
+
+for SEED in 10 20 30 40
+do
+    for ID in 00 13 33 65 88 99
+    do
+        python testing_controlnet_img2img.py \
+            --filepath testing_v6_rml_sd_v15_pp_hm3d_n500_rand1234_r300_c300 \
+            --ckpt 2000 \
+            --src_img /srv/share4/datasets/Hypersim/raw_dataset/ai_054_010/images/scene_cam_01_final_preview/frame.00$ID.color.jpg \
+            --src_lbl /srv/share4/datasets/Hypersim/raw_dataset/ai_054_010/images/scene_cam_01_geometry_preview/frame.00$ID.semantic.png \
+            --img_id $ID \
+            --img_dump_dir hm3d_sdv15_r300_c300_ctv11_hsim2real_v4_g50_r512_c2k_seed$SEED \
+            --base_dset nyu \
+            --resolution 512 \
+            --prompt a high-resolution photorealistic real world indoor scene in sks \
+            --seed $SEED
+    done
+done
+
 
 # GTAV Fine-tuned Stable Diffusion
 for CITY in zurich hamburg

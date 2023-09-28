@@ -73,3 +73,8 @@ python convert_dreambooth.py \
     --filepath testing_v6_rml_sd_v15_pp_gtav_semseg_n500_res_1024_rand1234 \
     --max_train_steps 2000 \
     --checkpointing_steps 1000
+
+python convert_dreambooth.py \
+    --filepath testing_v6_rml_sd_v15_pp_hm3d_n500_rand1234_r300_c300 \
+    --max_train_steps 2000 \
+    --checkpointing_steps 1000

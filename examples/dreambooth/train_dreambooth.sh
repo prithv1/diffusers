@@ -188,3 +188,39 @@ python train_dreambooth.py \
     --resize_reg_img 1 \
     --resolution 512 \
     --crop-size 512
+
+# On HM3D
+python train_dreambooth.py \
+    --pretrained_model_name_or_path "runwayml/stable-diffusion-v1-5" \
+    --instance_data_dir sd_datasets/sd_v3_dataset_hm3d_n500_rand1234 \
+    --output_dir testing_v6_rml_sd_v15_pp_hm3d_n500_rand1234_r300_c300 \
+    --num_class_images 500 \
+    --with_prior_preservation \
+    --class_data_dir sd_datasets/sd_v3_dataset_hm3d_n500_rand1234 \
+    --class_prompt "a high-resolution photorealistic real world indoor scene in sks" \
+    --checkpointing_steps 1000 \
+    --instance_prompt "a high-resolution photorealistic real world indoor scene in sks" \
+    --max_train_steps 2000 \
+    --resize_reg_img 1 \
+    --resolution 300 \
+    --crop-size 300
+
+############### Train Text Encoder Runs
+
+python train_dreambooth.py \
+    --pretrained_model_name_or_path "runwayml/stable-diffusion-v1-5" \
+    --instance_data_dir sd_datasets/sd_v3_dataset_city_n500_rand1234 \
+    --output_dir testing_v7_rml_sd_v15_pp_city_n500_res_2048_crop_2048_rand1234 \
+    --num_class_images 500 \
+    --with_prior_preservation \
+    --class_data_dir sd_datasets/sd_v3_dataset_city_n500_rand1234 \
+    --class_prompt "egocentric view of a high-resolution photorealistic urban street scene in sks" \
+    --checkpointing_steps 1000 \
+    --instance_prompt "egocentric view of a high-resolution photorealistic urban street scene in sks" \
+    --max_train_steps 2000 \
+    --resolution 1280 \
+    --crop-size 1280 \
+    --resize_reg_img 1
+
+
+
