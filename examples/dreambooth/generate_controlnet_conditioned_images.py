@@ -302,6 +302,8 @@ def main(args):
     for imgid in imglist:
         imgpath = os.path.join(args.src_imgdir, imgid)
         lblpath = os.path.join(args.src_lbldir, imgid)
+        if args.base_dset == "cityscapes":
+            lbl_trainid_path = os.path.join(args.src_lbldir, imgid[:-4] + "_labelTrainIds.png")
         img, lbl, imsize = prep_images(imgpath, lblpath, USE_MAP=USE_MAP, car_hood_fix=args.car_hood_fix, palette_quant=args.palette_quant)
         img.thumbnail((RES, RES))
         lbl.thumbnail((RES, RES))
@@ -327,8 +329,27 @@ def main(args):
             ).images[0]
         sz = tuple(imsize[::-1])[::-1]
         image = image.resize(sz, Image.LANCZOS)
-        savepath = os.path.join(output_folder, imgid)
-        image.save(savepath)
+
+        # saving images
+        img_save_base = os.path.join(output_folder,"images")
+        if not os.path.exists(img_save_base):
+            os.makedirs(img_save_base)
+
+        img_save_path = os.path.join(img_save_base, imgid)
+        image.save(img_save_path)
+        
+        # symlink the labels 
+        label_save_path_base = os.path.join(output_folder,"labels")
+        if not os.path.exists(label_save_path_base):
+            os.makedirs(label_save_path_base)
+
+        orig_label_save_path = os.path.join(label_save_path_base, imgid)
+        os.symlink(lblpath, orig_label_save_path)
+
+        # symlink the labeltrainIds
+        trainid_label_save_path = os.path.join(label_save_path_base, imgid[:-4] + "_labelTrainIds.png")
+        if args.base_dset == "cityscapes":
+            os.symlink(lbl_trainid_path, trainid_label_save_path)
     
 if __name__ == "__main__":
     args = parse_args()
