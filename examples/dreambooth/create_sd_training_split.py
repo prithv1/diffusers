@@ -137,12 +137,23 @@ if __name__ == "__main__":
     # )
     
     # Train a diffusion model on GTAV driving scene segmentation maps
-    DIRECTORY = "/srv/share4/datasets/GTA5DA/images"
+    # DIRECTORY = "/srv/share4/datasets/GTA5DA/images"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_gtav_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "gta_anno",
+    # )
+    
+    # HM3D as Real Data
+    DIRECTORY = "/srv/share4/datasets/HM3D_Sim/hm3d_sim"
     N_IMAGES = 500
-    DESTINATION = "sd_v3_dataset_gtav_n500_rand1234"
+    DESTINATION = "sd_v3_dataset_hm3d_n500_rand1234"
     create_sd_dataset(
         DIRECTORY,
         N_IMAGES,
         DESTINATION,
-        "gta_anno",
+        "nuscenes",
     )
