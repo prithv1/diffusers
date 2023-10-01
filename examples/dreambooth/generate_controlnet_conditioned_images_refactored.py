@@ -18,6 +18,7 @@ from accelerate import Accelerator
 from torchvision import transforms
 from my_utils import create_directory, generate_list_ckpt
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, StableDiffusionImg2ImgPipeline, UniPCMultistepScheduler
+from controlnet_aux import MLSDdetector
 
 random.seed(1234)
 
@@ -25,10 +26,12 @@ random.seed(1234)
 CITY2ADE_MAP = json.load(open("city2ade_translate_map.json", "r"))
 NYU2ADE_MAP = json.load(open("nyu2ade_translate_map.json", "r"))
 
+# MLSD MODEL
+mlsd = MLSDdetector.from_pretrained('lllyasviel/ControlNet')
+
 
 # N_IMGS = 50
 N_IMGS = 2975
-
 GTAV_IMIDS = ['{0:05d}'.format(x) + ".png" for x in random.sample(list(range(1, 24966)), N_IMGS)]
 
 # Get Edge Image
@@ -154,13 +157,7 @@ def parse_args():
         type=str,
         help="path to save directory",
     )
-    parser.add_argument(
-        "--use_edge",
-        required=False,
-        type=int,
-        default=0,
-        help="use edge conditioning?",
-    )
+
     parser.add_argument(
         "--prompt",
         default="egocentric view of a high resolution, photorealistic urban street scene in sks",
@@ -199,12 +196,39 @@ def parse_args():
         type=int,
         help="Palette Quantization?",
     )
-    # NEED TO USE
+
     parser.add_argument(
         "--car_hood_fix",
         default=0,
         type=int,
         help="Fix don't care label for car-hood",
+    )
+
+    parser.add_argument(
+        "--use_ft",
+        type=int,
+        default=1,
+    )
+
+    parser.add_argument(
+        "--use_seg_map",
+        default=0,
+        type=float,
+        help="Use segmentation map w/ conidtioning param val specified",
+    )
+
+    parser.add_argument(
+        "--use_edge",
+        default=0,
+        type=float,
+        help="Use canny edge w/ conidtioning param val specified",
+    )
+    
+    parser.add_argument(
+        "--use_mlsd",
+        default=0,
+        type=float,
+        help="Use straight line detector w/ conidtioning param val specified",
     )
     args, _ = parser.parse_known_args()
     return args
@@ -212,68 +236,74 @@ def parse_args():
 def main(args):
     # Setup model and devices
     device = "cuda"
-    
-    if args.use_edge == 1:
-        args.use_edge = True
-    else:
-        args.use_edge = False
-        
-    print("use edge", args.use_edge)
-    
-    # ControlNet
+
+    # ensure we have an input to controlnet
+    # ORDER: segmap, edge, mlsd
+    assert args.use_seg_map == 0 or args.use_edge == 0  or args.use_mlsd == 0, "At least one input to controlnet should be set."
+
+    ############################
+    ### CREATE OUTPUT FOLDER ###
+    ############################
+    output_folder = args.save_dir
+    create_directory(output_folder)
+
+    ##########################################
+    ### INIT CONTROL NET + STABLE DIFFUSION ##
+    ##########################################
+
+    # We'll condition on both segmentation and image
+    controlnet = []
+
+    print("Control Net inputs:")
+    if args.use_seg_map:
+        print("Using Seg Map")
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg", torch_dtype=torch.float16))
     if args.use_edge:
-        controlnet = [
-            ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg", torch_dtype=torch.float16),
-            ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny", torch_dtype=torch.float16),
-        ]
+        print("Using Edge Image")
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny", torch_dtype=torch.float16))
+    if args.use_mlsd:
+        print("Using MLSD Image")
+        controlnet.append(mlsd)
+
+    # To work with finetuned checkpoint
+    if args.use_ft == 1:
+        if args.rootdir_filepath:
+            model_id = os.path.join(args.rootdir_filepath, args.filepath, f"inf_ckpt{args.ckpt}")
+        else:
+            model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
+    
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            model_id, controlnet=controlnet, torch_dtype=torch.float16
+        )
     else:
-        controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg", torch_dtype=torch.float16),
-        
-    # Base SD-v1.5 model
-    if args.rootdir_filepath:
-        model_id = os.path.join(args.rootdir_filepath, args.filepath, f"inf_ckpt{args.ckpt}")
-    else:
-        model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
-    pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        model_id, controlnet=controlnet, torch_dtype=torch.float16
-    )
+    # To work with off-the-shelf checkpoint
+        pipe = StableDiffusionControlNetPipeline.from_pretrained(
+            "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=torch.float16
+        )
+    
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
     pipe.enable_model_cpu_offload()
-    # pipe.safety_checker = None
-    # pipe.requires_safety_checker = False
     
-    # Prompt + Generator
-    if args.use_edge:
-        # prompt = ["egocentric view of a high resolution, photorealistic urban street scene in sks"] * 2
-        prompt = [args.prompt]*2
-    else:
-        # prompt = "egocentric view of a high resolution, photorealistic urban street scene in sks"
-        prompt = args.prompt
+    prompt = [args.prompt] * len(controlnet)
+    GEN_SEED = args.seed
+    generator = [torch.Generator(device="cpu").manual_seed(GEN_SEED) for i in range(len(prompt))]
+
+    ###########################
+    ### PREPROCESSING INIIT ###
+    ###########################
 
     # set palette we use
     USE_MAP = CITY2ADE_MAP
     if args.base_dset == "nyu":
         USE_MAP = NYU2ADE_MAP
-
-    GEN_SEED = args.seed
-    generator = [torch.Generator(device="cpu").manual_seed(GEN_SEED) for i in range(len(prompt))]
     
-    # Setup save folder
-    output_folder = args.save_dir
-    create_directory(output_folder)
-    
-    # Loop over imagelist
-    
-    # Number of denoising steps
-    # N_STEPS = 20
+    # number of denoising steps
     N_STEPS = args.num_steps
-    # N_STEPS = 100
     
     # Resolution of generated image
-    # RES = 768
-    # RES = 1024
     RES = args.resolution
     
+    # get images from img list parameter
     if not args.src_imglist:
         print("Generating over entire dataset")
         args.src_imglist = GTAV_IMIDS
@@ -284,8 +314,8 @@ def main(args):
             imglist = file.read().splitlines() 
         args.src_imglist = imglist
     
-    print("IMAGE LIST LENGTH",len(imglist))
     N_IMGS = len(imglist)
+    print("IMAGE LIST LENGTH", N_IMGS)
     
     # Save metadata
     metadata = {
@@ -294,43 +324,73 @@ def main(args):
         "n_images": N_IMGS,
         "input_res": RES,
         "generator_seed": GEN_SEED,
+        "args": vars(args)
     }
-    
     with open(os.path.join(output_folder, "metadata.json"), "w") as f:
         json.dump(metadata, f)
+
     
+    # TODO: fill in pre and post transforms
+    pre_transform = None
+    post_transform = transforms.Resize((RES, RES)) # currently not used
+    
+
+    ##################################################
+    ### IMAGE AND LABEL PREPROCESSING + GENERATION ###
+    ##################################################
+
     for imgid in imglist:
+        # grab images 
         imgpath = os.path.join(args.src_imgdir, imgid)
         lblpath = os.path.join(args.src_lbldir, imgid)
         if args.base_dset == "cityscapes":
             lbl_trainid_path = os.path.join(args.src_lbldir, imgid[:-4] + "_labelTrainIds.png")
+        
+        # PREPROCESS IMAGES
         img, lbl, imsize = prep_images(imgpath, lblpath, USE_MAP=USE_MAP, car_hood_fix=args.car_hood_fix, palette_quant=args.palette_quant)
+        # resize img and label
         img.thumbnail((RES, RES))
         lbl.thumbnail((RES, RES))
+
+        # generate edge image + resize
         if args.use_edge:
-            edge_img = get_edge_image(img)
-        post_transform = transforms.Resize(imsize[::-1])
+            edge_image = get_edge_image(img)
+
+        # generate mlsd image + resize
+        if args.use_mlsd:
+            mlsd_image = mlsd(img)
+            mlsd_image.thumbnail((RES, RES))
+
+
+        # SET IMAGES FOR GENERATION + CONDITIONING
+        conditioning_image_list = []
+        controlnet_conditioning_scale = []  # suggested values: 1, 0.5, 0.7
+
+        if args.use_seg_map:
+            conditioning_image_list.append(lbl)
+            controlnet_conditioning_scale.append(args.use_seg_map)
         if args.use_edge:
-            conditioning = [lbl, edge_img]
-        if args.use_edge:
-            image = pipe(
-                prompt,
-                conditioning,
-                num_inference_steps=N_STEPS,
-                generator=generator,
-                controlnet_conditioning_scale=[1.0, 0.5],
-            ).images[0]
-        else:
-            image = pipe(
-                prompt,
-                lbl,
-                num_inference_steps=N_STEPS,
-                generator=generator,
-            ).images[0]
+            conditioning_image_list.append(edge_image)
+            controlnet_conditioning_scale.append(args.use_edge)
+        if args.use_mlsd == 1:
+            conditioning_image_list.append(mlsd_image)
+            controlnet_conditioning_scale.append(args.use_mlsd)
+
+
+        # GENERATION
+        image = pipe(
+            prompt,
+            conditioning_image_list,
+            num_inference_steps=N_STEPS,
+            generator=generator,
+            controlnet_conditioning_scale=controlnet_conditioning_scale,
+        ).images[0]
+
+        # resize generated image
         sz = tuple(imsize[::-1])[::-1]
         image = image.resize(sz, Image.LANCZOS)
 
-        # saving images
+        # SAVING GERNERATED IMAGES
         img_save_base = os.path.join(output_folder,"images")
         if not os.path.exists(img_save_base):
             os.makedirs(img_save_base)

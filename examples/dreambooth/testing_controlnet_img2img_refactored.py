@@ -23,6 +23,7 @@ from pprint import pprint
 
 from sklearn.metrics.pairwise import euclidean_distances
 
+# mapping to ade20k
 CITY2ADE_MAP = json.load(open("city2ade_translate_map.json", "r"))
 NYU2ADE_MAP = json.load(open("nyu2ade_translate_map.json", "r"))
 
@@ -71,6 +72,40 @@ def replace_black_pixels_vectorized(img, height=400, replacement_color=(0, 0, 14
     modified_img = Image.fromarray(np.uint8(img_array))
     return modified_img
 
+# Function to prep images
+def prep_images(imgpath, labelpath, output_folder, args, USE_MAP=CITY2ADE_MAP, car_hood_fix=0, palette_quant=0):
+    # Load image and label
+    image = Image.open(imgpath).convert("RGB")
+    lbl = Image.open(labelpath).convert("RGB")
+
+    if car_hood_fix:
+        lbl = replace_black_pixels_vectorized(lbl)
+    if palette_quant == 1:
+        lbl = gen_palette_quantization(USE_MAP, lbl)
+    
+    lbl.save(os.path.join(output_folder, f"src_orig_lbl_{str(args.img_id)}.png"))
+
+    # Get image size
+    imsize = image.size
+
+    # Label Translation
+    init_lbl_arr = np.array(lbl)
+    init_lbl_shape = init_lbl_arr.shape
+    init_lbl_arr = init_lbl_arr.reshape(-1, 3)
+    unique_img_vals = [tuple(x) for x in list(np.unique(init_lbl_arr, axis=0))]
+    conv_keys = list(USE_MAP.keys())
+    conv_keys = [tuple([int(x) for x in re.findall(r'\d+', k)]) for k in conv_keys]
+    for uniq_val in unique_img_vals:
+        key_idx = np.where(np.equal(init_lbl_arr, list(uniq_val)).all(1))[0]
+        if uniq_val in conv_keys:
+            init_lbl_arr[key_idx] = CITY2ADE_MAP[str(tuple(uniq_val))]
+        else:
+            init_lbl_arr[key_idx] = (0, 0, 0)
+  
+    init_lbl_arr = init_lbl_arr.reshape(init_lbl_shape)
+    lbl = Image.fromarray(np.uint8(init_lbl_arr), "RGB")
+    
+    return image, lbl, imsize
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
@@ -173,12 +208,26 @@ def parse_args():
         type=int,
         help="Fix don't care label for car-hood",
     )
+
+    parser.add_argument(
+        "--use_seg_map",
+        default=0,
+        type=float,
+        help="Use segmentation map w/ conidtioning param val specified",
+    )
+
+    parser.add_argument(
+        "--use_edge",
+        default=0,
+        type=float,
+        help="Use canny edge w/ conidtioning param val specified",
+    )
     
     parser.add_argument(
         "--use_mlsd",
         default=0,
-        type=int,
-        help="Use straight line detector",
+        type=float,
+        help="Use straight line detector w/ conidtioning param val specified",
     )
     
     args, _ = parser.parse_known_args()
@@ -187,9 +236,14 @@ def parse_args():
 
 def main(args):
     device = "cuda"
-    # output_folder = os.path.join(
-    #         "logs/images", args.filepath, f"ctnet_i2i_debug_{args.filepath}_e{args.ckpt}"
-    #     )
+
+    # ensure we have an input to controlnet
+    # ORDER: segmap, edge, mlsd
+    assert args.use_seg_map == 0 or args.use_edge == 0  or args.use_mlsd == 0, "At least one input to controlnet should be set."
+
+    ############################
+    ### CREATE OUTPUT FOLDER ###
+    ############################
     if args.img_dump_dir is None:
         args.img_dump_dir = args.filepath
     
@@ -201,15 +255,29 @@ def main(args):
         output_folder = os.path.join(
                 "logs/images", args.img_dump_dir, f"ctnet_i2i_debug_e{args.ckpt}"
             )
-    
-    # We'll condition on both segmentation and image
-    controlnet = [
-        ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg", torch_dtype=torch.float16),
-        ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny", torch_dtype=torch.float16),
-    ]
+
     print(output_folder)
     create_directory(output_folder)
     
+    ##########################################
+    ### INIT CONTROL NET + STABLE DIFFUSION ##
+    ##########################################
+
+    # We'll condition on both segmentation and image
+
+    controlnet = []
+
+    print("Control Net inputs:")
+    if args.use_seg_map:
+        print("Using Seg Map")
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_seg", torch_dtype=torch.float16))
+    if args.use_edge:
+        print("Using Edge Image")
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny", torch_dtype=torch.float16))
+    if args.use_mlsd:
+        print("Using MLSD Image")
+        controlnet.append(mlsd)
+
     # To work with finetuned checkpoint
     if args.use_ft == 1:
         
@@ -230,74 +298,77 @@ def main(args):
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
     pipe.enable_model_cpu_offload() 
     # pipe.enable_xformers_memory_efficient_attention()
-    
-    # prompt = ["egocentric view of a high resolution, photorealistic urban street scene in sks"]*2
-    prompt = [args.prompt]*2
+
+    # have as many prompts as we have for input to controlnet
+    prompt = [args.prompt]*len(controlnet)
     generator = [torch.Generator(device="cpu").manual_seed(args.seed) for i in range(len(prompt))]
-    # generator = [torch.Generator(device="cpu").manual_seed(33) for i in range(len(prompt))]
-    
+
+    #####################################
+    ### IMAGE AND LABEL PREPROCESSING ###
+    #####################################
+
     USE_MAP = CITY2ADE_MAP
     if args.base_dset == "nyu":
         USE_MAP = NYU2ADE_MAP
+
+    init_image, init_lbl, imsize = prep_images(imgpath=args.src_img, labelpath=args.src_lbl, output_folder=output_folder, args=args, USE_MAP=USE_MAP, car_hood_fix=args.car_hood_fix, palette_quant=args.palette_quant)
     
-    init_image = Image.open(args.src_img).convert("RGB")
-    init_lbl = Image.open(args.src_lbl).convert("RGB")
-    if args.car_hood_fix:
-        init_lbl = replace_black_pixels_vectorized(init_lbl)
-    if args.palette_quant == 1:
-        init_lbl = gen_palette_quantization(USE_MAP, init_lbl)
-    init_lbl.save(os.path.join(output_folder, f"src_orig_lbl_{str(args.img_id)}.png"))
-    
-    # Preprocess label
-    init_lbl_arr = np.array(init_lbl)
-    init_lbl_shape = init_lbl_arr.shape
-    init_lbl_arr = init_lbl_arr.reshape(-1, 3)
-    unique_img_vals = [tuple(x) for x in list(np.unique(init_lbl_arr, axis=0))]
-    # conv_keys = list(CITY2ADE_MAP.keys())
-    conv_keys = list(USE_MAP.keys())
-    conv_keys = [tuple([int(x) for x in re.findall(r'\d+', k)]) for k in conv_keys]
-    for uniq_val in unique_img_vals:
-        key_idx = np.where(np.equal(init_lbl_arr, list(uniq_val)).all(1))[0]
-        if uniq_val in conv_keys:
-            # init_lbl_arr[key_idx] = CITY2ADE_MAP[str(tuple(uniq_val))]
-            init_lbl_arr[key_idx] = USE_MAP[str(tuple(uniq_val))]
-        else:
-            init_lbl_arr[key_idx] = (0, 0, 0)
-  
-    init_lbl_arr = init_lbl_arr.reshape(init_lbl_shape)
-    init_lbl = Image.fromarray(np.uint8(init_lbl_arr), "RGB")
-    
+    # transforms
     RES = args.resolution
-    post_transform = transforms.Resize((RES, RES))
+
+    # TODO: fill in pre and post transforms
+    pre_transform = None
+    post_transform = transforms.Resize((RES, RES)) # currently not used
+
+    #resize image, label, and edge image (thumbnail preserves image aspect ratio)
     init_image.thumbnail((RES, RES))
-    edge_image = get_edge_image(init_image)
-    if args.use_mlsd == 1:
+    init_lbl.thumbnail((RES, RES))
+
+    # generate edge image
+    if args.use_edge:
+        edge_image = get_edge_image(init_image)
+        edge_image.save(os.path.join(output_folder, f"src_edge_{str(args.img_id)}.png"))
+
+    # generate mlsd image
+    if args.use_mlsd:
         mlsd_image = mlsd(init_image)
         mlsd_image.thumbnail((RES, RES))
         mlsd_image.save(os.path.join(output_folder, f"src_mlsd_{str(args.img_id)}.png"))
-    init_lbl.thumbnail((RES, RES))
     
-    edge_image.save(os.path.join(output_folder, f"src_edge_{str(args.img_id)}.png"))
+    # save the pre-processed images
     init_image.save(os.path.join(output_folder, f"src_im_{str(args.img_id)}.png"))
     init_lbl.save(os.path.join(output_folder, f"src_lbl_{str(args.img_id)}.png"))
+
     
-    # Actual denoising generation process
+    # set images and conditioning scale for generation
+    image_list = []
+
+    # suggested values: 1, 0.5, 0.7
+    controlnet_conditioning_scale = []
+
+    if args.use_seg_map:
+        image_list.append(init_lbl)
+        controlnet_conditioning_scale.append(args.use_seg_map)
+    if args.use_edge:
+        image_list.append(edge_image)
+        controlnet_conditioning_scale.append(args.use_edge)
     if args.use_mlsd == 1:
-        image = pipe(
-            prompt,
-            [init_lbl, mlsd_image, edge_image],
-            num_inference_steps=50, # Controllable hparam
-            generator=generator,
-            controlnet_conditioning_scale=[1.0, 0.7, 0.5], # Controllable hparam
-        ).images[0]
-    else:
-        image = pipe(
-            prompt,
-            [init_lbl, edge_image],
-            num_inference_steps=50, # Controllable hparam
-            generator=generator,
-            controlnet_conditioning_scale=[1.0, 0.5], # Controllable hparam
-        ).images[0]
+        image_list.append(mlsd_image)
+        controlnet_conditioning_scale.append(args.use_mlsd)
+
+    
+    ##########################
+    ### GENERATION PROCESS ###
+    ##########################
+
+    # Actual denoising generation process
+    image = pipe(
+        prompt,
+        image_list,
+        num_inference_steps=50, # Controllable hparam
+        generator=generator,
+        controlnet_conditioning_scale=controlnet_conditioning_scale, # Controllable hparam
+    ).images[0]
     
     # image = image.resize((1914, 1052), Image.LANCZOS)
     image.save(os.path.join(output_folder, f"tr_im_{str(args.img_id)}.png"))
