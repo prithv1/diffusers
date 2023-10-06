@@ -230,6 +230,13 @@ def parse_args():
         type=float,
         help="Use straight line detector w/ conidtioning param val specified",
     )
+
+    parser.add_argument(
+        "--no_overwrite",
+        default=False,
+        type=bool,
+        help="Use straight line detector w/ conidtioning param val specified",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -343,6 +350,18 @@ def main(args):
         # grab images 
         imgpath = os.path.join(args.src_imgdir, imgid)
         lblpath = os.path.join(args.src_lbldir, imgid)
+
+        # HACK
+        # dont overwrite the ones we've done
+        img_save_base = os.path.join(output_folder,"images")
+        img_save_path = os.path.join(img_save_base, imgid)
+        label_save_path_base = os.path.join(output_folder,"labels")
+        orig_label_save_path = os.path.join(label_save_path_base, imgid)
+
+        # skip generation if we've done this in this dir and seed before
+        if os.path.exists(orig_label_save_path) and args.no_overwrite:
+            continue
+
         if args.base_dset == "cityscapes":
             lbl_trainid_path = os.path.join(args.src_lbldir, imgid[:-4] + "_labelTrainIds.png")
         
@@ -375,8 +394,7 @@ def main(args):
         if args.use_mlsd == 1:
             conditioning_image_list.append(mlsd_image)
             controlnet_conditioning_scale.append(args.use_mlsd)
-
-
+        
         # GENERATION
         image = pipe(
             prompt,

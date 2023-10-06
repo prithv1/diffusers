@@ -14,5 +14,5 @@ do
         --resolution 1024 \
         --car_hood_fix 1 \
         --use_seg_map 1.0
-        # --use_edge 0.5
+        --use_edge 0.5
 done
