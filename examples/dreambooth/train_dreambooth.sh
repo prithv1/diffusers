@@ -224,3 +224,20 @@ python train_dreambooth.py \
 
 
 
+############## Train Dreambooth Dark Zurich Train-All ########################
+python train_dreambooth.py \
+    --pretrained_model_name_or_path "runwayml/stable-diffusion-v1-5" \
+    --instance_data_dir sd_datasets/sd_v3_dataset_dz_tr_all_n500_rand1234 \
+    --output_dir genrun_v1_rml_sd_v15_pp_dz_tr_all_n500_res_512_crop_512_rand1234 \
+    --num_class_images 500 \
+    --with_prior_preservation \
+    --class_data_dir sd_datasets/sd_v3_dataset_dz_tr_all_n500_rand1234 \
+    --class_prompt "egocentric view of a high-resolution photorealistic urban street scene in sks" \
+    --checkpointing_steps 1000 \
+    --instance_prompt "egocentric view of a high-resolution photorealistic urban street scene in sks" \
+    --max_train_steps 2000 \
+    --resolution 512 \
+    --crop-size 512 \
+    --resize_reg_img 1
+
+

@@ -79,38 +79,46 @@ def replace_black_pixels_vectorized(img, height=400, replacement_color=(0, 0, 14
     return modified_img
 
 # Function to prep images
-def prep_images(imgpath, labelpath, USE_MAP=CITY2ADE_MAP, car_hood_fix=0, palette_quant=0):
+def prep_images(imgpath, labelpath, USE_MAP=CITY2ADE_MAP, car_hood_fix=0, palette_quant=0, use_labels=True):
     # Load image and label
     image = Image.open(imgpath).convert("RGB")
-    lbl = Image.open(labelpath).convert("RGB")
-
-    if car_hood_fix:
-        lbl = replace_black_pixels_vectorized(lbl)
-    if palette_quant == 1:
-        lbl = gen_palette_quantization(USE_MAP, lbl)
+    if use_labels:
+        lbl = Image.open(labelpath).convert("RGB")
+        if car_hood_fix:
+            lbl = replace_black_pixels_vectorized(lbl)
+        if palette_quant == 1:
+            lbl = gen_palette_quantization(USE_MAP, lbl)
 
     # Get image size
     imsize = image.size
 
     # Label Translation
-    init_lbl_arr = np.array(lbl)
-    init_lbl_shape = init_lbl_arr.shape
-    init_lbl_arr = init_lbl_arr.reshape(-1, 3)
-    unique_img_vals = [tuple(x) for x in list(np.unique(init_lbl_arr, axis=0))]
-    conv_keys = list(USE_MAP.keys())
-    conv_keys = [tuple([int(x) for x in re.findall(r'\d+', k)]) for k in conv_keys]
-    for uniq_val in unique_img_vals:
-        key_idx = np.where(np.equal(init_lbl_arr, list(uniq_val)).all(1))[0]
-        if uniq_val in conv_keys:
-            init_lbl_arr[key_idx] = USE_MAP[str(tuple(uniq_val))]
-        else:
-            init_lbl_arr[key_idx] = (0, 0, 0)
-  
-    init_lbl_arr = init_lbl_arr.reshape(init_lbl_shape)
-    lbl = Image.fromarray(np.uint8(init_lbl_arr), "RGB")
+    if use_labels:
+        init_lbl_arr = np.array(lbl)
+        init_lbl_shape = init_lbl_arr.shape
+        init_lbl_arr = init_lbl_arr.reshape(-1, 3)
+        unique_img_vals = [tuple(x) for x in list(np.unique(init_lbl_arr, axis=0))]
+        conv_keys = list(USE_MAP.keys())
+        conv_keys = [tuple([int(x) for x in re.findall(r'\d+', k)]) for k in conv_keys]
+        for uniq_val in unique_img_vals:
+            key_idx = np.where(np.equal(init_lbl_arr, list(uniq_val)).all(1))[0]
+            if uniq_val in conv_keys:
+                init_lbl_arr[key_idx] = USE_MAP[str(tuple(uniq_val))]
+            else:
+                init_lbl_arr[key_idx] = (0, 0, 0)
+    
+        init_lbl_arr = init_lbl_arr.reshape(init_lbl_shape)
+        lbl = Image.fromarray(np.uint8(init_lbl_arr), "RGB")
+    else:
+        lbl = None
     
     return image, lbl, imsize
     
+def check_path_validity(save_path):
+    # Check if save path has recursive directories
+    root_till_last = "/" + "/".join(save_path.split("/")[:-1])
+    if not os.path.exists(root_till_last):
+        os.makedirs(root_till_last)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a generation script.")
@@ -140,7 +148,8 @@ def parse_args():
     )
     parser.add_argument(
         "--src_lbldir",
-        required=True,
+        # required=True,
+        required=False,
         type=str,
         help="path of the source image-label directory",
     )
@@ -170,6 +179,12 @@ def parse_args():
         default="cityscapes",
         type=str,
         help="Base dataset palette specs",
+    )
+    parser.add_argument(
+        "--gen_dset",
+        default="gtav",
+        type=str,
+        help="Source dataset to be used",
     )
     parser.add_argument(
         "--resolution",
@@ -270,7 +285,7 @@ def main(args):
         controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_canny", torch_dtype=torch.float16))
     if args.use_mlsd:
         print("Using MLSD Image")
-        controlnet.append(mlsd)
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_mlsd", torch_dtype=torch.float16))
 
     # To work with finetuned checkpoint
     if args.use_ft == 1:
@@ -349,37 +364,63 @@ def main(args):
     for imgid in imglist:
         # grab images 
         imgpath = os.path.join(args.src_imgdir, imgid)
-        lblpath = os.path.join(args.src_lbldir, imgid)
+        if args.use_seg_map == 1:
+            if args.gen_dset == "cityscapes":
+                lblpath = os.path.join(args.src_lbldir, imgid.replace("_leftImg8bit.png", "_gtFine_color.png"))
+            else:
+                lblpath = os.path.join(args.src_lbldir, imgid)
+        else:
+            lblpath = None
 
         # HACK
         # dont overwrite the ones we've done
         img_save_base = os.path.join(output_folder,"images")
         img_save_path = os.path.join(img_save_base, imgid)
-        label_save_path_base = os.path.join(output_folder,"labels")
-        orig_label_save_path = os.path.join(label_save_path_base, imgid)
+        
+        # Check if save path has recursive directories
+        # If not, create directories recursively
+        check_path_validity(img_save_path)
+        
+        if args.use_seg_map == 1:
+            label_save_path_base = os.path.join(output_folder,"labels")
+            if args.gen_dset == "cityscapes":
+                orig_label_save_path = os.path.join(label_save_path_base, imgid.replace("_leftImg8bit.png", "_gtFine_color.png"))
+            else:
+                orig_label_save_path = os.path.join(label_save_path_base, imgid)
+            
+            check_path_validity(orig_label_save_path)
 
-        # skip generation if we've done this in this dir and seed before
-        if os.path.exists(orig_label_save_path) and args.no_overwrite:
-            continue
+            # skip generation if we've done this in this dir and seed before
+            if os.path.exists(orig_label_save_path) and args.no_overwrite:
+                continue
 
-        if args.base_dset == "cityscapes":
-            lbl_trainid_path = os.path.join(args.src_lbldir, imgid[:-4] + "_labelTrainIds.png")
+            if args.base_dset == "cityscapes":
+                if args.gen_dset == "cityscapes":
+                    lbl_trainid_path = os.path.join(args.src_lbldir, imgid.replace("_leftImg8bit.png", "_gtFine_labelTrainIds.png"))
+                else:
+                    lbl_trainid_path = os.path.join(args.src_lbldir, imgid[:-4] + "_labelTrainIds.png")
+
+                check_path_validity(lbl_trainid_path)
         
         # PREPROCESS IMAGES
-        img, lbl, imsize = prep_images(imgpath, lblpath, USE_MAP=USE_MAP, car_hood_fix=args.car_hood_fix, palette_quant=args.palette_quant)
+        if args.use_seg_map == 1:
+            use_labels = True
+        else:
+            use_labels = False
+        img, lbl, imsize = prep_images(imgpath, lblpath, USE_MAP=USE_MAP, car_hood_fix=args.car_hood_fix, palette_quant=args.palette_quant, use_labels=use_labels)
         # resize img and label
         img.thumbnail((RES, RES))
-        lbl.thumbnail((RES, RES))
+        if lbl is not None:
+            lbl.thumbnail((RES, RES))
 
         # generate edge image + resize
         if args.use_edge:
             edge_image = get_edge_image(img)
-
+            
         # generate mlsd image + resize
         if args.use_mlsd:
             mlsd_image = mlsd(img)
-            mlsd_image.thumbnail((RES, RES))
-
+            
 
         # SET IMAGES FOR GENERATION + CONDITIONING
         conditioning_image_list = []
@@ -416,18 +457,25 @@ def main(args):
         img_save_path = os.path.join(img_save_base, imgid)
         image.save(img_save_path)
         
-        # symlink the labels 
-        label_save_path_base = os.path.join(output_folder,"labels")
-        if not os.path.exists(label_save_path_base):
-            os.makedirs(label_save_path_base)
+        if use_labels:
+            # symlink the labels 
+            label_save_path_base = os.path.join(output_folder,"labels")
+            if not os.path.exists(label_save_path_base):
+                os.makedirs(label_save_path_base)
+        
+            if args.gen_dset == "cityscapes":
+                orig_label_save_path = os.path.join(label_save_path_base, imgid.replace("_leftImg8bit.png", "_gtFine_color.png"))
+            else:
+                orig_label_save_path = os.path.join(label_save_path_base, imgid)
+            os.symlink(lblpath, orig_label_save_path)
 
-        orig_label_save_path = os.path.join(label_save_path_base, imgid)
-        os.symlink(lblpath, orig_label_save_path)
-
-        # symlink the labeltrainIds
-        trainid_label_save_path = os.path.join(label_save_path_base, imgid[:-4] + "_labelTrainIds.png")
-        if args.base_dset == "cityscapes":
-            os.symlink(lbl_trainid_path, trainid_label_save_path)
+            # symlink the labeltrainIds
+            if args.gen_dset == "cityscapes":
+                trainid_label_save_path = os.path.join(label_save_path_base, imgid.replace("_leftImg8bit.png", "_gtFine_labelTrainIds.png"))
+            else:
+                trainid_label_save_path = os.path.join(label_save_path_base, imgid[:-4] + "_labelTrainIds.png")
+            if args.base_dset == "cityscapes":
+                os.symlink(lbl_trainid_path, trainid_label_save_path)
     
 if __name__ == "__main__":
     args = parse_args()

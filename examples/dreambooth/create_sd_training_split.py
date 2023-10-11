@@ -22,6 +22,14 @@ def get_imglist(directory, dset="cityscapes"):
         imlist = glob.glob(directory + "/*.png")
     elif dset == "gta_anno":
         imlist = glob.glob(directory + "/*.png")
+    elif dset == "dz_tr_all":
+        imlist = glob.glob(directory + "/*/*/*.png")
+    elif dset in ["dz_tr_day", "dz_tr_night", "dz_tr_twilight"]:
+        imlist = glob.glob(directory + "/*/*.png")
+    elif dset == "acdc_tr_all":
+        imlist = glob.glob(directory + "/*/train/*/*.png")
+    elif dset in ["acdc_tr_fog", "acdc_tr_night", "acdc_tr_rain", "acdc_tr_snow"]:
+        imlist = glob.glob(directory + "/train/*/*.png")
     else:
         print("Dataset not supported")
     return imlist
@@ -35,7 +43,12 @@ def create_sd_dataset(directory, n_images, destination, dset="cityscapes", filte
     
     # print(imlist)
     print(len(imlist))
-
+    if n_images > len(imlist):
+        n_images = len(imlist)
+        destination = destination.split("_")
+        destination[-2] = "n" + str(n_images)
+        destination = "_".join(destination)
+        
     imgs = random.sample(imlist, n_images)
     
     dst_dir = os.path.join("sd_datasets", destination)
@@ -148,12 +161,122 @@ if __name__ == "__main__":
     # )
     
     # HM3D as Real Data
-    DIRECTORY = "/srv/share4/datasets/HM3D_Sim/hm3d_sim"
+    # DIRECTORY = "/srv/share4/datasets/HM3D_Sim/hm3d_sim"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_hm3d_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "nuscenes",
+    # )
+    
+    # # Dark Zurich as Real Data (Train-All)
+    # DIRECTORY = "/srv/share4/datasets/Dark_Zurich/rgb_anon/train"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_dz_tr_all_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "dz_tr_all",
+    # )
+    
+    # # Dark Zurich as Real Data (Train-Day)
+    # DIRECTORY = "/srv/share4/datasets/Dark_Zurich/rgb_anon/train/day"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_dz_tr_day_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "dz_tr_day",
+    # )
+    
+    # # Dark Zurich as Real Data (Train-Night)
+    # DIRECTORY = "/srv/share4/datasets/Dark_Zurich/rgb_anon/train/night"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_dz_tr_night_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "dz_tr_night",
+    # )
+    
+    # # Dark Zurich as Real Data (Train-twilight)
+    # DIRECTORY = "/srv/share4/datasets/Dark_Zurich/rgb_anon/train/twilight"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_dz_tr_twilight_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "dz_tr_twilight",
+    # )
+    
+    # ACDC as Real Data (Train-all)
+    # DIRECTORY = "/srv/share4/datasets/ACDC/rgb_anon"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_acdc_tr_all_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "acdc_tr_all",
+    # )
+    
+    # ACDC as Real Data (Train-fog)
+    # DIRECTORY = "/srv/share4/datasets/ACDC/rgb_anon/fog"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_acdc_tr_fog_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "acdc_tr_fog",
+    # )
+    
+    # ACDC as Real Data (Train-night)
+    # DIRECTORY = "/srv/share4/datasets/ACDC/rgb_anon/night"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_acdc_tr_night_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "acdc_tr_night",
+    # )
+    
+    # ACDC as Real Data (Train-rain)
+    # DIRECTORY = "/srv/share4/datasets/ACDC/rgb_anon/rain"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_acdc_tr_rain_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "acdc_tr_rain",
+    # )
+    
+    # # ACDC as Real Data (Train-snow)
+    # DIRECTORY = "/srv/share4/datasets/ACDC/rgb_anon/snow"
+    # N_IMAGES = 500
+    # DESTINATION = "sd_v3_dataset_acdc_tr_snow_n500_rand1234"
+    # create_sd_dataset(
+    #     DIRECTORY,
+    #     N_IMAGES,
+    #     DESTINATION,
+    #     "acdc_tr_snow",
+    # )
+    
+    # Habitat Showcase as real data
+    DIRECTORY = "/srv/share4/prithvi/misc/habitat_showcase_data/real_data"
     N_IMAGES = 500
-    DESTINATION = "sd_v3_dataset_hm3d_n500_rand1234"
+    DESTINATION = "sd_v3_dataset_habitat_real_n500_rand1234"
     create_sd_dataset(
         DIRECTORY,
         N_IMAGES,
         DESTINATION,
-        "nuscenes",
+        "nyuv2",
     )
