@@ -18,17 +18,22 @@ from accelerate import Accelerator
 from torchvision import transforms
 from my_utils import create_directory, generate_list_ckpt
 from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, StableDiffusionImg2ImgPipeline, UniPCMultistepScheduler
-from controlnet_aux import MLSDdetector
+from controlnet_aux import MLSDdetector, PidiNetDetector, HEDdetector, ContentShuffleDetector
 
 random.seed(1234)
 
 # Color-code Mapping from GTAV / Cityscapes to ADE20k
 CITY2ADE_MAP = json.load(open("city2ade_translate_map.json", "r"))
 NYU2ADE_MAP = json.load(open("nyu2ade_translate_map.json", "r"))
+HSSD2ADE_MAP = json.load(open("hssd2ade_translate_map.json", "r"))
 
 # MLSD MODEL
 mlsd = MLSDdetector.from_pretrained('lllyasviel/ControlNet')
 
+# Soft-edge Detector
+processor = HEDdetector.from_pretrained('lllyasviel/Annotators')
+sedge = PidiNetDetector.from_pretrained('lllyasviel/Annotators')
+shuffle_det = ContentShuffleDetector()
 
 # N_IMGS = 50
 N_IMGS = 2975
@@ -96,6 +101,10 @@ def prep_images(imgpath, labelpath, USE_MAP=CITY2ADE_MAP, car_hood_fix=0, palett
     if use_labels:
         init_lbl_arr = np.array(lbl)
         init_lbl_shape = init_lbl_arr.shape
+        if len(init_lbl_shape) != 3:
+            init_lbl_arr = init_lbl_arr[:, :, None]
+            init_lbl_arr = np.concatenate([init_lbl_arr, init_lbl_arr, init_lbl_arr], axis=2)
+            init_lbl_shape = init_lbl_arr.shape
         init_lbl_arr = init_lbl_arr.reshape(-1, 3)
         unique_img_vals = [tuple(x) for x in list(np.unique(init_lbl_arr, axis=0))]
         conv_keys = list(USE_MAP.keys())
@@ -245,6 +254,27 @@ def parse_args():
         type=float,
         help="Use straight line detector w/ conidtioning param val specified",
     )
+    
+    parser.add_argument(
+        "--use_softedge",
+        default=0,
+        type=float,
+        help="Use soft edge detector w/ conidtioning param val specified",
+    )
+    
+    parser.add_argument(
+        "--use_shuffle",
+        default=0,
+        type=float,
+        help="Use shuffle detector w/ conidtioning param val specified",
+    )
+    
+    parser.add_argument(
+        "--read_im_inorder",
+        default=0,
+        type=float,
+        help="Read input images in order",
+    )
 
     parser.add_argument(
         "--no_overwrite",
@@ -286,7 +316,13 @@ def main(args):
     if args.use_mlsd:
         print("Using MLSD Image")
         controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_mlsd", torch_dtype=torch.float16))
-
+    if args.use_softedge:
+        print("Using Soft-Edge")
+        controlnet.append(ControlNetModel.from_pretrained("lllyasviel/control_v11p_sd15_softedge", torch_dtype=torch.float16))
+    if args.use_shuffle:
+        print("Using Shuffle Guidance")
+        shuffle_controlnet = ControlNetModel.from_pretrained("lllyasviel/control_v11e_sd15_shuffle", torch_dtype=torch.float16)
+        
     # To work with finetuned checkpoint
     if args.use_ft == 1:
         if args.rootdir_filepath:
@@ -294,9 +330,17 @@ def main(args):
         else:
             model_id = os.path.join("logs/checkpoints", args.filepath, f"inf_ckpt{args.ckpt}")
     
-        pipe = StableDiffusionControlNetPipeline.from_pretrained(
-            model_id, controlnet=controlnet, torch_dtype=torch.float16
-        )
+        if args.use_shuffle:
+            pipe = StableDiffusionControlNetPipeline.from_pretrained(
+                model_id, controlnet=controlnet + [shuffle_controlnet], torch_dtype=torch.float16
+            )
+            base_pipe = StableDiffusionControlNetPipeline.from_pretrained(
+                model_id, controlnet=controlnet, torch_dtype=torch.float16
+            )
+        else:
+            pipe = StableDiffusionControlNetPipeline.from_pretrained(
+                model_id, controlnet=controlnet, torch_dtype=torch.float16
+            )
     else:
     # To work with off-the-shelf checkpoint
         pipe = StableDiffusionControlNetPipeline.from_pretrained(
@@ -305,6 +349,9 @@ def main(args):
     
     pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
     pipe.enable_model_cpu_offload()
+    if args.use_shuffle:
+        base_pipe.scheduler = UniPCMultistepScheduler.from_config(base_pipe.scheduler.config)
+        base_pipe.enable_model_cpu_offload()
     
     prompt = [args.prompt] * len(controlnet)
     GEN_SEED = args.seed
@@ -318,6 +365,8 @@ def main(args):
     USE_MAP = CITY2ADE_MAP
     if args.base_dset == "nyu":
         USE_MAP = NYU2ADE_MAP
+    elif args.base_dset == "hssd":
+        USE_MAP = HSSD2ADE_MAP
     
     # number of denoising steps
     N_STEPS = args.num_steps
@@ -356,10 +405,17 @@ def main(args):
     pre_transform = None
     post_transform = transforms.Resize((RES, RES)) # currently not used
     
+    if args.use_shuffle:
+        shuffle_image = None
 
     ##################################################
     ### IMAGE AND LABEL PREPROCESSING + GENERATION ###
     ##################################################
+
+    if args.read_im_inorder:
+        sort_imgs = [int(x.split(".")[0]) for x in imglist]
+        sort_imgs.sort()
+        imglist = [str(x) + ".png" for x in sort_imgs]
 
     for imgid in imglist:
         # grab images 
@@ -420,7 +476,13 @@ def main(args):
         # generate mlsd image + resize
         if args.use_mlsd:
             mlsd_image = mlsd(img)
+        
+        # generate soft-edge image
+        if args.use_softedge:
+            soft_edge_image = sedge(img, safe=True)
             
+        # if args.use_shuffle:
+        #     shuffle_image = None
 
         # SET IMAGES FOR GENERATION + CONDITIONING
         conditioning_image_list = []
@@ -432,18 +494,51 @@ def main(args):
         if args.use_edge:
             conditioning_image_list.append(edge_image)
             controlnet_conditioning_scale.append(args.use_edge)
-        if args.use_mlsd == 1:
+        if args.use_mlsd:
             conditioning_image_list.append(mlsd_image)
             controlnet_conditioning_scale.append(args.use_mlsd)
+        if args.use_softedge:
+            conditioning_image_list.append(soft_edge_image)
+            controlnet_conditioning_scale.append(args.use_softedge)
+        if args.use_shuffle:
+            if shuffle_image is not None:
+                conditioning_image_list.append(shuffle_image)
+                controlnet_conditioning_scale.append(args.use_shuffle)
         
         # GENERATION
-        image = pipe(
-            prompt,
-            conditioning_image_list,
-            num_inference_steps=N_STEPS,
-            generator=generator,
-            controlnet_conditioning_scale=controlnet_conditioning_scale,
-        ).images[0]
+        # image = pipe(
+        #     prompt,
+        #     conditioning_image_list,
+        #     num_inference_steps=N_STEPS,
+        #     generator=generator,
+        #     controlnet_conditioning_scale=controlnet_conditioning_scale,
+        # ).images[0]
+        if args.use_shuffle:
+            if shuffle_image is None:
+                image = base_pipe(
+                    prompt,
+                    conditioning_image_list,
+                    num_inference_steps=N_STEPS,
+                    generator=generator,
+                    controlnet_conditioning_scale=controlnet_conditioning_scale,
+                ).images[0]
+                shuffle_image = shuffle_det(image)
+            else:
+                image = pipe(
+                    prompt + [prompt[0]],
+                    conditioning_image_list,
+                    num_inference_steps=N_STEPS,
+                    generator=generator + [generator[0]],
+                    controlnet_conditioning_scale=controlnet_conditioning_scale,
+                ).images[0]
+        else:
+            image = pipe(
+                prompt,
+                conditioning_image_list,
+                num_inference_steps=N_STEPS,
+                generator=generator,
+                controlnet_conditioning_scale=controlnet_conditioning_scale,
+            ).images[0]
 
         # resize generated image
         sz = tuple(imsize[::-1])[::-1]

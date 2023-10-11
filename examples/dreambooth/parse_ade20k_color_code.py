@@ -74,6 +74,30 @@ CITYSCAPES_NAME2COLOR = {
     'bicycle'      : (119, 11, 32),
 }
 
+HSSD_NAME2COLOR = {
+    'bathtub': 2,
+    'bed': 3,
+    'bench': 4,
+    'cabinet': 5,
+    'chair': 6,
+    'chest_of_drawers': 7, # map to chest
+    'couch': 8,
+    'counter': 9,
+    'filing_cabinet': 10, # dresser
+    'hamper': 11, # basket
+    'serving_cart': 12, # ?
+    'shelves': 13, # shelf
+    'shoe_rack': 14, # counter
+    'sink': 15,
+    'stand': 16,
+    'stool': 17,
+    'table': 18,
+    'toilet': 19,
+    'trunk': 20, # box
+    'wardrobe': 21,
+    'washer_dryer': 22, # washer
+}
+
 # NYUv2_NAME2COLOR = {}
 
 def get_nyuv2_color_scheme(palette_csv):
@@ -179,6 +203,42 @@ def make_dataset_specific_json(dset="cityscapes"):
         pprint(translate_map)
         with open("nyu2ade_translate_map.json", "w") as f:
             json.dump(translate_map, f)
+    elif dset == "hssd":
+        # custom hssd name map to ade20k
+        change_keys = {
+            "chest_of_drawers": "chest",
+            "filing_cabinet": "dresser",
+            "hamper": "basket",
+            "serving_cart": "countertop",
+            "shelves": "shelf",
+            "shoe_rack": "counter",
+            "trunk": "box",
+            "washer_dryer": "washer",
+        }
+        use_map = copy.deepcopy(HSSD_NAME2COLOR)
+        for k in change_keys.keys():
+            use_map[change_keys[k]] = use_map[k]
+            del use_map[k]
+        rev_map = {v:k for k,v in use_map.items()}
+        # pprint(rev_map)
+        translate_map = {}
+        for city_color in rev_map.keys():
+            city_cls = rev_map[city_color]
+            feed_color = (city_color, city_color, city_color)
+            # print(city_cls)
+            # print(city_color)
+            # Get color from ade
+            sub_dct = list(ade_df[ade_df["Name"] == city_cls].T.to_dict().values())[0]
+            ade_color = sub_dct["Color_Code (R,G,B)"]
+            ade_color = tuple([int(x) for x in re.findall(r'\d+', ade_color)])
+            # print(city_cls, city_color, ade_color)
+            # translate_map[str(city_color)] = ade_color
+            print(city_cls, feed_color, ade_color)
+            translate_map[str(feed_color)] = ade_color
+        print("*"*20)
+        pprint(translate_map)
+        with open("hssd2ade_translate_map.json", "w") as f:
+            json.dump(translate_map, f)
     else:
         print("Not supported yet")
 
@@ -187,4 +247,5 @@ def make_dataset_specific_json(dset="cityscapes"):
 if __name__ == "__main__":
     # load_csv()
     # make_dataset_specific_json()
-    make_dataset_specific_json("nyuv2")
+    # make_dataset_specific_json("nyuv2")
+    make_dataset_specific_json("hssd")
